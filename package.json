@@ -1,0 +1,46 @@
+{
+  "name": "cheapkz",
+  "version": "1.0.0",
+  "description": "Мониторинг цен и алерты «лови сейчас»: билеты, аренда, товары Kaspi/OLX/Krisha по Казахстану",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=23.0.0"
+  },
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "dev:web": "vite",
+    "build": "npm run build:web && npm run build:server",
+    "build:web": "vite build",
+    "build:server": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.web.json --noEmit"
+  },
+  "dependencies": {
+    "@fastify/cors": "^10.1.0",
+    "@fastify/static": "^10.1.3",
+    "cheerio": "^1.0.0",
+    "croner": "^8.1.0",
+    "dotenv": "^16.4.5",
+    "fastify": "^5.12.3",
+    "grammy": "^1.30.0",
+    "undici": "^6.19.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.5.4",
+    "@types/react": "^18.3.5",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.45",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tailwindcss": "^3.4.10",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.4",
+    "vite": "^5.4.3",
+    "vitest": "^2.0.5"
+  }
+}

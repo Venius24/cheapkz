@@ -1,0 +1,29 @@
+{
+  "data": [
+    {
+      "origin": "ALA",
+      "destination": "NQZ",
+      "price": 34900,
+      "currency": "kzt",
+      "departure_at": "2026-09-12T08:20:00+05:00",
+      "return_at": null,
+      "airline": "KC",
+      "flight_number": "KC852",
+      "transfers": 0,
+      "link": "/search/ALA1209NQZ1?t=KC1726116000-1726118400"
+    },
+    {
+      "origin": "ALA",
+      "destination": "NQZ",
+      "price": 41200,
+      "currency": "kzt",
+      "departure_at": "2026-09-13T19:40:00+05:00",
+      "return_at": null,
+      "airline": "DV",
+      "flight_number": "DV702",
+      "transfers": 0,
+      "link": "/search/ALA1309NQZ1?t=DV1726164000-1726166400"
+    }
+  ],
+  "currency": "kzt"
+}

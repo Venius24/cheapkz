@@ -1,0 +1,68 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  background:
+    radial-gradient(1100px 500px at 15% -10%, rgba(139, 92, 246, 0.16), transparent 60%),
+    radial-gradient(900px 420px at 95% 0%, rgba(34, 211, 238, 0.12), transparent 55%),
+    radial-gradient(700px 700px at 50% 110%, rgba(244, 63, 94, 0.08), transparent 60%),
+    #0b0d14;
+  color: #e7eaf2;
+}
+
+@layer components {
+  .glass {
+    @apply rounded-2xl border border-white/10 bg-white/[0.04] backdrop-blur-xl;
+  }
+  .glass-hover {
+    @apply transition duration-200 hover:border-vio/40 hover:bg-white/[0.06];
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition select-none;
+  }
+  .btn-primary {
+    @apply btn text-white shadow-glow;
+    background: linear-gradient(135deg, #8b5cf6, #22d3ee);
+  }
+  .btn-primary:hover {
+    filter: brightness(1.1);
+  }
+  .btn-ghost {
+    @apply btn border border-white/10 bg-white/5 hover:bg-white/10;
+  }
+  .btn-danger {
+    @apply btn border border-hot/30 bg-hot/10 text-hot hover:bg-hot/20;
+  }
+  .input {
+    @apply w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm outline-none placeholder:text-white/25 focus:border-cy/50;
+  }
+  .label {
+    @apply mb-1 block text-xs font-medium uppercase tracking-wider text-white/40;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold;
+  }
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
