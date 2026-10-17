@@ -1,5 +1,5 @@
 # ---- build ----
-FROM node:24-bookworm-slim AS build
+FROM node:25-bookworm-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm ci --no-audit --no-fund
@@ -7,7 +7,7 @@ COPY . .
 RUN npm run build
 
 # ---- runtime ----
-FROM node:24-bookworm-slim
+FROM node:25-bookworm-slim
 ENV NODE_ENV=production TZ=Asia/Almaty
 WORKDIR /app
 COPY package.json package-lock.json* ./
