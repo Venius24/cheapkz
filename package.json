@@ -26,9 +26,11 @@
     "dotenv": "^16.4.5",
     "fastify": "^5.12.3",
     "grammy": "^1.30.0",
+    "leaflet": "^1.9.4",
     "undici": "^6.19.8"
   },
   "devDependencies": {
+    "@types/leaflet": "^1.9.12",
     "@types/node": "^22.5.4",
     "@types/react": "^18.3.5",
     "@types/react-dom": "^18.3.0",

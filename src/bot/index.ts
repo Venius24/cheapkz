@@ -16,6 +16,7 @@ import {
 } from '../db/index.js'
 import { detectKind, getAdapter } from '../sources/index.js'
 import { kaspiProductSlug, slugTitle } from '../sources/kaspi.js'
+import { isScanKind } from '../sources/scan.js'
 import { money, timeAgoRu } from '../util.js'
 import { log } from '../log.js'
 
@@ -32,7 +33,9 @@ const KIND_ICON: Record<string, string> = {
   olx: '🛍',
   krisha: '🏠',
   flights: '✈️',
-  generic: '🌐'
+  generic: '🌐',
+  krisha_zone: '🗺',
+  kaspi_category: '🎯'
 }
 
 const HELP = `<b>Как пользоваться</b>
@@ -52,6 +55,8 @@ const HELP = `<b>Как пользоваться</b>
 /digest 9 — сводка каждый день в 9:00
 /quiet 23:00 07:00 — тихие часы
 /delete id
+
+🗺 Детектор аномалий: в веб-панели выбери районы Krisha на карте или категории Kaspi — сюда будут приходить аномально дешёвые объявления и товары.
 
 Алгоритм «ЛОВИ СЕЙЧАС» 🔥 сам кричит, когда цена аномально хороша.`
 
@@ -77,7 +82,11 @@ function defaultTitle(kind: string, url: string): string {
 
 function card(w: WatcherRow): string {
   const icon = KIND_ICON[w.kind] ?? '•'
-  const price = w.last_price != null ? money(w.last_price) : 'ещё не проверялось'
+  const price = isScanKind(w.kind)
+    ? `🔎 ${esc(w.best_title ?? 'детектор ещё не запускался')}`
+    : w.last_price != null
+      ? money(w.last_price)
+      : 'ещё не проверялось'
   const err = w.last_error ? `\n⚠️ ${esc(w.last_error.slice(0, 160))}` : ''
   const target = w.target_price != null ? `\n🎯 Цель: ${money(w.target_price)}` : ''
   const drop = w.drop_pct != null ? `\n📉 Алерт при падении ≥${w.drop_pct}%` : ''

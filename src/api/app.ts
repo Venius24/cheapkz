@@ -1,4 +1,4 @@
-import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify'
+import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify'
 import cors from '@fastify/cors'
 import fastifyStatic from '@fastify/static'
 import fs from 'node:fs'
@@ -27,6 +27,8 @@ import {
 } from '../db/index.js'
 import { HttpGuard } from '../http/client.js'
 import { detectKind } from '../sources/index.js'
+import { isScanKind } from '../sources/scan.js'
+import { registerDetectorRoutes } from './detector.js'
 import type { Scheduler } from '../worker/index.js'
 import { slope, timeAgoRu } from '../util.js'
 
@@ -262,7 +264,8 @@ export function createApp(deps: AppDeps): FastifyInstance {
   app.get('/api/deals', async (req) => {
     const q = req.query as { level?: string; kind?: string; limit?: string }
     const limit = clampInt(q.limit, 1, 200, 100)
-    let rows = listWatchers(db).filter((w) => w.last_price != null)
+    // сканы детектора не имеют «лучшей цены» — их находки живут в /api/detector/anomalies
+    let rows = listWatchers(db).filter((w) => w.last_price != null && !isScanKind(w.kind))
     if (q.level) rows = rows.filter((w) => w.last_level === q.level)
     if (q.kind) rows = rows.filter((w) => w.kind === q.kind)
     rows.sort((a, b) => (b.last_score ?? 0) - (a.last_score ?? 0))
@@ -279,6 +282,9 @@ export function createApp(deps: AppDeps): FastifyInstance {
       ago: timeAgoRu(w.last_run_at)
     }))
   })
+
+  // ---------- детектор аномалий ----------
+  registerDetectorRoutes(app, { db, scheduler })
 
   // ---------- настройки ----------
   app.get('/api/settings', async () => kvAllPrefix(db, 'setting.'))
@@ -309,13 +315,18 @@ export function createApp(deps: AppDeps): FastifyInstance {
     void app.register(fastifyStatic, { root: distWeb, prefix: '/', index: false, decorateReply: false })
   }
 
+  const sendIndex = (reply: FastifyReply) => {
+    if (indexCache == null && fs.existsSync(indexPath)) indexCache = fs.readFileSync(indexPath)
+    if (indexCache) return reply.type('text/html; charset=utf-8').send(indexCache)
+    return reply.code(503).send('Веб-панель не собрана. Выполните: npm run build')
+  }
+
+  // статика с index: false отвечает на «/» 403 (это каталог), поэтому корень — явно
+  app.get('/', async (_req, reply) => sendIndex(reply))
+
   app.setNotFoundHandler(async (req, reply) => {
     const url = req.url.split('?')[0]
-    if (req.method === 'GET' && !url.startsWith('/api') && !url.startsWith('/metrics')) {
-      if (indexCache == null && fs.existsSync(indexPath)) indexCache = fs.readFileSync(indexPath)
-      if (indexCache) return reply.type('text/html; charset=utf-8').send(indexCache)
-      return reply.code(503).send('Веб-панель не собрана. Выполните: npm run build')
-    }
+    if (req.method === 'GET' && !url.startsWith('/api') && !url.startsWith('/metrics')) return sendIndex(reply)
     return reply.code(404).send({ error: 'not found' })
   })
 

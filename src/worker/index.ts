@@ -22,6 +22,8 @@ import {
 } from '../db/index.js'
 import { SourceError, HttpGuard } from '../http/client.js'
 import { getAdapter } from '../sources/index.js'
+import { isScanKind } from '../sources/scan.js'
+import { applyScan } from './scan.js'
 import type { Offer } from '../sources/types.js'
 import { hotScore } from '../core/hotScore.js'
 import { evaluateRules, filtersOf, passesFilters } from '../core/rules.js'
@@ -70,6 +72,13 @@ export async function runWatcher(deps: Deps, watcherId: number): Promise<{ offer
     if (code === 'CONFIG') log.warn(`watcher #${w.id}: ${msg}`)
     else log.warn(`watcher #${w.id} (${w.kind}) ошибка: ${msg}`)
     throw e
+  }
+
+  // сканы детектора: много независимых позиций вместо одной лучшей цены
+  if (isScanKind(w.kind)) {
+    const r = applyScan(db, w, params, offers)
+    scheduleNext(db, w, w.interval_min)
+    return r
   }
 
   // --- фильтры и новые объявления ---

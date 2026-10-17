@@ -126,3 +126,86 @@ export function fmtMoney(n: number | null | undefined, cur = 'KZT'): string {
   const sym = cur === 'KZT' ? '₸' : cur === 'USD' ? '$' : cur === 'RUB' ? '₽' : cur === 'EUR' ? '€' : cur
   return `${Math.round(Math.abs(n)).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '\u2009')}\u2009${sym}`
 }
+
+// ---------- детектор аномалий ----------
+export type ScanKind = 'krisha_zone' | 'kaspi_category'
+
+export interface CatalogCity {
+  id: string
+  name: string
+  kaspiCity: string
+  center: [number, number]
+  zoom: number
+  districts: Array<{ alias: string; name: string }>
+}
+
+export interface CatalogCategory {
+  code: string
+  name: string
+  group: string
+  icon: string
+}
+
+export interface DetectorCatalog {
+  cities: CatalogCity[]
+  categories: CatalogCategory[]
+}
+
+export interface Scan {
+  id: number
+  kind: ScanKind
+  title: string
+  params: Record<string, unknown>
+  interval_min: number
+  active: boolean
+  summary: string | null
+  last_level: string | null
+  last_error: string | null
+  last_run_at: string | null
+  next_run_at: string | null
+  ago: string
+  anomalies7d: number
+}
+
+export interface Anomaly {
+  id: number
+  watcher_id: number
+  source: 'krisha' | 'kaspi'
+  kind: 'drop' | 'market'
+  external_id: string
+  zone: string
+  zone_label: string | null
+  title: string | null
+  url: string | null
+  image: string | null
+  price: number
+  ref_value: number | null
+  value: number | null
+  pct: number
+  score: number
+  level: 'hot' | 'warm'
+  suspicious: boolean
+  reason: string | null
+  meta: Record<string, unknown>
+  created_at: string
+  ago: string
+}
+
+export interface ZoneStat {
+  listings: number
+  medianUnit: number | null
+  medianPrice: number | null
+  anomalies7d: number
+}
+
+export const detector = {
+  catalog: () => request<DetectorCatalog>('/api/detector/catalog'),
+  scans: () => request<Scan[]>('/api/detector/scans'),
+  createScan: (payload: { kind: ScanKind; params: object; interval_min?: number }) =>
+    request<Scan>('/api/detector/scans', { method: 'POST', body: JSON.stringify(payload) }),
+  updateScan: (id: number, payload: object) =>
+    request<Scan>(`/api/detector/scans/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
+  anomalies: (source?: string, limit = 60) =>
+    request<Anomaly[]>(`/api/detector/anomalies?limit=${limit}${source ? `&source=${source}` : ''}`),
+  zones: (deal: string) => request<{ deal: string; zones: Record<string, ZoneStat> }>(`/api/detector/zones?deal=${deal}`)
+}

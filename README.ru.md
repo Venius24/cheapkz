@@ -186,14 +186,14 @@ src/
   bot/index.ts      grammy-бот
   api/app.ts        Fastify REST + SPA + /metrics
 web/                React + Tailwind панель
-tests/              vitest: 116 автотестов
+tests/              vitest: 159 автотестов
 fixtures/           фикстуры HTML/JSON для тестов парсеров
 ```
 
 ## 🧪 Тесты и проверки
 
 ```bash
-npm test            # 116 unit/integration тестов
+npm test            # 159 unit/integration тестов
 npm run typecheck   # строгая типизация сервера и фронтенда
 npm run build       # сборка продакшена
 ```

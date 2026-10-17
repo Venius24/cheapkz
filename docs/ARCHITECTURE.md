@@ -46,6 +46,17 @@ Single egress point. Layers, outermost first:
 | Body cap | `http/client.ts` | responses truncated at 4 MiB |
 | Block detection | `http/client.ts` | captcha / DDoS-Guard markers in the body count as a *block*, not as a parser error |
 
+## Anomaly detector
+
+Scans are ordinary watchers of kind `krisha_zone` / `kaspi_category`, so they reuse the scheduler, back-off and alert delivery. After the fetch, `runWatcher()` hands the items to `applyScan()` (`src/worker/scan.ts`) instead of the best-price pipeline:
+
+1. **Fetch** — `src/sources/scan.ts` walks every selected district (`krisha.kz/<deal>/kvartiry/<district>/`) or Kaspi category (catalog JSON) page by page through `HttpGuard`; one failed page does not drop the whole scan.
+2. **History** — every item keeps its own series in `price_points` (`external_id` = listing / product id).
+3. **Detect** — `detectAnomaly()` (`src/core/anomaly.ts`, pure) runs only for new or just-cheapened items:
+   - *drop*: price fell ≥ N % below the item's own norm (median of the last ≤ 10 points);
+   - *market* (Krisha): ₸/m² ≥ N % below the median of the same district, same deal, same room count and similar area (±35 %), with at least 6 peers and ≥ 1.5 MAD below. Median/MAD keep single outliers from moving the norm; ≥ 55 % below is flagged as suspicious.
+4. **Persist & alert** — findings go to `anomalies`; at most 5 Telegram alerts per run (the rest as one summary), and the same item repeats only after 24 h or a further drop.
+
 ## Data model
 
 Defined as ordered migrations in `src/db/client.ts`, applied with `PRAGMA user_version` inside a transaction.
@@ -55,13 +66,14 @@ Defined as ordered migrations in `src/db/client.ts`, applied with `PRAGMA user_v
 - `price_points` — time series of the best price per watcher (written only on change)
 - `alerts` — produced alerts and delivery state
 - `proxies` — per-proxy health stats
+- `anomalies` — detector findings (source, zone, price vs. reference, score, «suspicious» flag) for the feed and the map
 - `kv` — key/value store for cooldowns, counters and a TTL cache (expiry encoded in the value) for upstream API responses
 
 Retention (`RETENTION_DAYS`) prunes old points and delivered alerts on a timer.
 
 ## Frontend
 
-`web/` is a Vite + React + Tailwind SPA (Dashboard, Watchers, Radar, Settings). In production Fastify serves the built bundle from `dist/web`, so there is exactly one deployable.
+`web/` is a Vite + React + Tailwind SPA (Dashboard, Watchers, Detector, Radar, Settings). The detector map uses Leaflet with OpenStreetMap tiles; district boundaries are a static GeoJSON from OSM (`web/src/geo/kz-districts.json`, ODbL). In production Fastify serves the built bundle from `dist/web`, so there is exactly one deployable.
 
 ## Observability
 
@@ -71,4 +83,4 @@ Retention (`RETENTION_DAYS`) prunes old points and delivered alerts on a timer.
 
 ## Testing strategy
 
-Vitest, 116 tests. The HTTP layer is tested against a real local server (redirect loops, 403 / 5xx / 404, oversized bodies) rather than mocks; adapters are tested against recorded fixtures in `fixtures/`; the API is tested through the Fastify app with a temporary on-disk SQLite database.
+Vitest, 159 tests. The HTTP layer is tested against a real local server (redirect loops, 403 / 5xx / 404, oversized bodies) rather than mocks; adapters are tested against recorded fixtures in `fixtures/`; the API is tested through the Fastify app with a temporary on-disk SQLite database.

@@ -4,13 +4,17 @@ import { olxAdapter } from './olx.js'
 import { krishaAdapter } from './krisha.js'
 import { flightsAdapter } from './flights.js'
 import { genericAdapter } from './generic.js'
+import { krishaZoneAdapter, kaspiCategoryAdapter } from './scan.js'
 
 export const ADAPTERS: SourceAdapter[] = [
   kaspiAdapter,
   olxAdapter,
   krishaAdapter,
   flightsAdapter,
-  genericAdapter
+  genericAdapter,
+  // сканеры детектора по URL не определяются — создаются только из раздела «Детектор»
+  krishaZoneAdapter,
+  kaspiCategoryAdapter
 ]
 
 export function getAdapter(kind: string): SourceAdapter {
