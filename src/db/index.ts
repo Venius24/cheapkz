@@ -146,6 +146,7 @@ export function updateWatcher(db: DB, id: number, patch: Record<string, unknown>
 export function deleteWatcherCascade(db: DB, id: number): boolean {
   return tx(db, () => {
     db.prepare(`DELETE FROM alerts WHERE watcher_id=?`).run(id)
+    db.prepare(`DELETE FROM anomalies WHERE watcher_id=?`).run(id)
     db.prepare(`DELETE FROM offers WHERE watcher_id=?`).run(id)
     db.prepare(`DELETE FROM price_points WHERE watcher_id=?`).run(id)
     return db.prepare(`DELETE FROM watchers WHERE id=?`).run(id).changes > 0
@@ -331,6 +332,88 @@ export function hotCountSince(db: DB, iso: string): number {
   )
 }
 
+// ---------- anomalies ----------
+export interface AnomalyRow {
+  id: number
+  watcher_id: number
+  source: string
+  kind: string
+  external_id: string
+  zone: string
+  zone_label: string | null
+  title: string | null
+  url: string | null
+  image: string | null
+  price: number
+  ref_value: number | null
+  value: number | null
+  pct: number
+  score: number
+  level: string
+  suspicious: number
+  reason: string | null
+  meta_json: string
+  created_at: string
+}
+
+export function insertAnomaly(db: DB, a: Omit<AnomalyRow, 'id' | 'created_at'>): AnomalyRow {
+  const info = db
+    .prepare(
+      `INSERT INTO anomalies (watcher_id, source, kind, external_id, zone, zone_label, title, url, image, price,
+         ref_value, value, pct, score, level, suspicious, reason, meta_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      a.watcher_id, a.source, a.kind, a.external_id, a.zone, a.zone_label, a.title, a.url, a.image, a.price,
+      a.ref_value, a.value, a.pct, a.score, a.level, a.suspicious, a.reason, a.meta_json
+    )
+  return db.prepare(`SELECT * FROM anomalies WHERE id=?`).get(Number(info.lastInsertRowid)) as AnomalyRow
+}
+
+export interface AnomalyQuery {
+  source?: string
+  zone?: string
+  watcherId?: number
+  limit?: number
+}
+
+export function listAnomalies(db: DB, q: AnomalyQuery = {}): AnomalyRow[] {
+  const where: string[] = []
+  const args: unknown[] = []
+  if (q.source) (where.push('source=?'), args.push(q.source))
+  if (q.zone) (where.push('zone=?'), args.push(q.zone))
+  if (q.watcherId != null) (where.push('watcher_id=?'), args.push(q.watcherId))
+  const sql = `SELECT * FROM anomalies ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY id DESC LIMIT ?`
+  return db.prepare(sql).all(...args, q.limit ?? 50) as AnomalyRow[]
+}
+
+/** Число находок по зонам за последние days суток — для бейджей на карте. */
+export function anomalyCountsByZone(db: DB, days: number): Record<string, number> {
+  const rows = db
+    .prepare(
+      `SELECT zone, COUNT(*) AS n FROM anomalies WHERE created_at >= datetime('now', ?) GROUP BY zone`
+    )
+    .all(`-${Math.max(1, Math.round(days))} days`) as Array<{ zone: string; n: number }>
+  return Object.fromEntries(rows.map((r) => [r.zone, Number(r.n)]))
+}
+
+/** Свежие объявления сканов указанного типа (для рыночной статистики районов). */
+export function recentScanOffers(
+  db: DB,
+  kind: string,
+  days: number,
+  watcherId?: number
+): Array<Pick<OfferRow, 'external_id' | 'price' | 'meta_json'>> {
+  return db
+    .prepare(
+      `SELECT o.external_id, o.price, o.meta_json FROM offers o JOIN watchers w ON w.id=o.watcher_id
+       WHERE w.kind=? AND o.seen_at >= datetime('now', ?) ${watcherId != null ? 'AND w.id=?' : ''}`
+    )
+    .all(kind, `-${Math.max(1, Math.round(days))} days`, ...(watcherId != null ? [watcherId] : [])) as Array<
+    Pick<OfferRow, 'external_id' | 'price' | 'meta_json'>
+  >
+}
+
 // ---------- kv ----------
 export function kvGet(db: DB, key: string): string | null {
   const row = db.prepare(`SELECT v FROM kv WHERE k=?`).get(key) as { v: string | null } | undefined
@@ -386,6 +469,7 @@ export function pruneOldData(db: DB, retentionDays: number): number {
       .prepare(`DELETE FROM alerts WHERE delivered_at IS NULL AND attempts >= 5 AND created_at < datetime('now','-7 days')`)
       .run().changes
     n += db.prepare(`DELETE FROM kv WHERE k LIKE 'cd:%' AND v < ?`).run(nowIso()).changes
+    n += db.prepare(`DELETE FROM anomalies WHERE created_at < datetime('now', ?)`).run(cutoff).changes
     return n
   })
 }

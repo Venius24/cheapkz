@@ -1,0 +1,28 @@
+{
+  "data": [
+    {
+      "id": "900000001",
+      "title": "Смартфон Example X1 8 ГБ/256 ГБ черный",
+      "brand": "Example",
+      "shopLink": "/p/smartfon-example-x1-8-gb-256-gb-chernyi-900000001/?c=710000000",
+      "unitPrice": 199990,
+      "unitSalePrice": 179990,
+      "unitPriceBeforeDiscount": 249990,
+      "discount": 28,
+      "rating": 4.8,
+      "reviewsQuantity": 312,
+      "previewImages": [{ "small": "https://resources.cdn-kaspi.kz/img/m/p/x1.png?format=preview-small", "medium": "https://resources.cdn-kaspi.kz/img/m/p/x1.png?format=preview-medium" }]
+    },
+    {
+      "id": "900000002",
+      "title": "Смартфон Example Lite 4 ГБ/64 ГБ синий",
+      "brand": "Example",
+      "shopLink": "/p/smartfon-example-lite-900000002/?c=710000000",
+      "unitPrice": 59990,
+      "previewImages": []
+    },
+    { "id": "900000003", "title": "Без цены", "shopLink": "/p/bez-ceny-900000003/" }
+  ],
+  "promotedCards": [],
+  "promotedItems": []
+}

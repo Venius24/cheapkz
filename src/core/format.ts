@@ -43,6 +43,43 @@ export function buildAlertMessage(ctx: AlertContext, ruleLabel: string): string 
   return lines.join('\n')
 }
 
+export interface AnomalyMessageCtx {
+  source: 'krisha' | 'kaspi'
+  title: string
+  url: string
+  zoneLabel: string
+  price: number
+  /** Норма: медиана рынка (₸/м²) или обычная цена позиции */
+  ref: number
+  pct: number
+  kind: 'drop' | 'market'
+  level: 'hot' | 'warm'
+  suspicious: boolean
+  reason: string
+  unit?: number | null
+  address?: string | null
+  prevPrice?: number | null
+}
+
+export function buildAnomalyMessage(a: AnomalyMessageCtx): string {
+  const lines: string[] = []
+  const head = a.source === 'krisha' ? '🏠 Аномально дёшево' : '🛒 Аномалия цены Kaspi'
+  lines.push(`${a.level === 'hot' ? '🚨 ' : ''}<b>${head}</b> · ${escapeHtml(a.zoneLabel)}${a.level === 'hot' ? ' 🔥' : ''}`)
+  lines.push(`<b>${escapeHtml(a.title)}</b>`)
+  if (a.address) lines.push(`📍 ${escapeHtml(a.address)}`)
+  if (a.kind === 'market') {
+    lines.push(`💰 <b>${money(a.price)}</b> · ${money(a.unit)}/м² — у похожих в районе ${money(a.ref)}/м²`)
+  } else {
+    lines.push(`💰 <b>${money(a.price)}</b>  <s>${money(a.ref)}</s>  <b>−${Math.round(a.pct)}%</b>`)
+  }
+  const details = [a.reason]
+  if (a.prevPrice != null && a.prevPrice > a.price && a.kind === 'market') details.push(`📉 было ${money(a.prevPrice)}`)
+  lines.push(escapeHtml(details.join(' · ')))
+  if (a.suspicious) lines.push('⚠️ <i>Слишком дёшево для рынка — проверьте объявление, так часто выглядят ошибки и мошенники.</i>')
+  lines.push(`<a href="${escapeHtml(a.url)}">открыть →</a>`)
+  return lines.join('\n')
+}
+
 export function buildDigestMessage(brand: string, items: Array<{ level: string; message: string; title: string }>): string {
   const hot = items.filter((i) => i.level === 'hot').length
   const head = `🌅 <b>Дайджест ${escapeHtml(brand)}</b> за сутки — алертов: <b>${items.length}</b>${hot ? `, горячих: <b>${hot}</b> 🔥` : ''}`

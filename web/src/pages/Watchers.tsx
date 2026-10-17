@@ -184,7 +184,11 @@ export default function Watchers() {
   const { show, node } = useToast()
 
   const load = () => {
-    api.watchers().then(setRows).catch(() => setRows([]))
+    // сканы детектора живут в своём разделе
+    api
+      .watchers()
+      .then((ws) => setRows(ws.filter((w) => w.kind !== 'krisha_zone' && w.kind !== 'kaspi_category')))
+      .catch(() => setRows([]))
   }
   useEffect(() => {
     void load()

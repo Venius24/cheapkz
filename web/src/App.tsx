@@ -3,13 +3,15 @@ import { api, clearToken, setToken } from './api'
 import Dashboard from './pages/Dashboard'
 import Watchers from './pages/Watchers'
 import Radar from './pages/Radar'
+import Detector from './pages/Detector'
 import SettingsPage from './pages/Settings'
 
-type Tab = 'dashboard' | 'watchers' | 'radar' | 'settings'
+type Tab = 'dashboard' | 'watchers' | 'detector' | 'radar' | 'settings'
 
 const TABS: Array<{ id: Tab; icon: string; label: string }> = [
   { id: 'dashboard', icon: '📊', label: 'Обзор' },
   { id: 'watchers', icon: '👀', label: 'Наблюдения' },
+  { id: 'detector', icon: '🛰', label: 'Детектор' },
   { id: 'radar', icon: '📡', label: 'Радар' },
   { id: 'settings', icon: '⚙️', label: 'Настройки' }
 ]
@@ -114,6 +116,7 @@ export default function App() {
 
         {tab === 'dashboard' && <Dashboard go={(t) => setTab(t as Tab)} />}
         {tab === 'watchers' && <Watchers />}
+        {tab === 'detector' && <Detector />}
         {tab === 'radar' && <Radar />}
         {tab === 'settings' && <SettingsPage />}
       </main>
@@ -124,7 +127,7 @@ export default function App() {
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
-            className={`flex flex-col items-center gap-0.5 rounded-xl px-4 py-1.5 text-[10px] ${tab === t.id ? 'bg-vio/20 text-white' : 'text-white/45'}`}
+            className={`flex flex-col items-center gap-0.5 rounded-xl px-2.5 py-1.5 text-[10px] ${tab === t.id ? 'bg-vio/20 text-white' : 'text-white/45'}`}
           >
             <span className="text-base">{t.icon}</span>
             {t.label}

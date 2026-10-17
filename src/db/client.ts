@@ -153,5 +153,32 @@ const MIGRATIONS: string[] = [
     k TEXT PRIMARY KEY,
     v TEXT
   );
+  `,
+  // находки детектора аномалий: структурированно, для ленты и карты
+  `
+  CREATE TABLE IF NOT EXISTS anomalies (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    watcher_id INTEGER NOT NULL REFERENCES watchers(id) ON DELETE CASCADE,
+    source TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    external_id TEXT NOT NULL,
+    zone TEXT NOT NULL,
+    zone_label TEXT,
+    title TEXT,
+    url TEXT,
+    image TEXT,
+    price REAL NOT NULL,
+    ref_value REAL,
+    value REAL,
+    pct REAL NOT NULL,
+    score INTEGER NOT NULL,
+    level TEXT NOT NULL,
+    suspicious INTEGER NOT NULL DEFAULT 0,
+    reason TEXT,
+    meta_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_anomalies_w ON anomalies(watcher_id, id);
+  CREATE INDEX IF NOT EXISTS idx_anomalies_zone ON anomalies(zone, created_at);
   `
 ]

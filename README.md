@@ -10,7 +10,7 @@ Watches **Kaspi.kz**, **OLX.kz**, **Krisha.kz** and flight prices, scores every 
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 ![Node](https://img.shields.io/badge/node-%E2%89%A5%2023-339933?logo=node.js&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-116%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-159%20passing-brightgreen)
 
 **🇬🇧 English** · [🇷🇺 Русский](README.ru.md) · [Architecture](docs/ARCHITECTURE.md) · [Decisions (ADR)](docs/adr/README.md)
 
@@ -33,13 +33,14 @@ It is also a deliberate exercise in building a scraper-backed service *responsib
 | | |
 |---|---|
 | 🔥 **Explainable Hot Score** | 0–100 from discount vs. old price, position in the item's own history, depth below its maximum and freshness. Alerts read like *"−22% from old price · cheaper than 91% of its history"*. ([ADR 0005](docs/adr/0005-explainable-hot-score.md)) |
+| 🛰 **Anomaly detector** | select Krisha districts on a live map or Kaspi categories — a periodic scan flags listings ≥ N% cheaper per m² than similar flats nearby and items that suddenly drop below their own median price |
 | 🎯 **Alert rules** | target price · drop of N% · historical-low percentile · new listings matching keyword / price filters |
 | 🧠 **Noise control** | per-rule cooldowns, dedup, quiet hours that *hot* alerts can break through, mute, daily digest, price-trend regression ("wait or buy") |
 | 🛡 **Anti-ban HTTP layer** | per-host token bucket + jitter + global concurrency, UA rotation, weighted proxy pool with exponential cooldown, per-domain circuit breaker, captcha/DDoS-Guard detection |
 | 🔒 **Security-minded** | SSRF guard re-validated on **every redirect hop**, secret redaction in logs/errors, constant-time token compare, HTML-escaped bot output |
 | 📈 **Operable** | Prometheus `/metrics`, `/health`, retention job, Docker image running as non-root, SQLite in WAL mode |
 | 🧩 **Extensible** | a source is one file returning `Offer[]`; a generic CSS-selector adapter covers any other site without code |
-| 🧪 **Tested** | 116 tests: pure-logic unit tests, parser tests against fixtures, HTTP layer against a real local server, API integration tests |
+| 🧪 **Tested** | 159 tests: pure-logic unit tests, parser tests against fixtures, HTTP layer against a real local server, API integration tests |
 
 ## How it works
 
@@ -163,7 +164,7 @@ docs/         architecture + ADRs
 
 ```bash
 npm run typecheck   # strict TS, server + web
-npm test            # 116 tests
+npm test            # 159 tests
 npm run build
 ```
 
