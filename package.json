@@ -24,7 +24,7 @@
     "cheerio": "^1.0.0",
     "croner": "^8.1.0",
     "dotenv": "^16.4.5",
-    "fastify": "^5.12.3",
+    "fastify": "^5.12.7",
     "grammy": "^1.30.0",
     "leaflet": "^1.9.4",
     "undici": "^6.19.8"
