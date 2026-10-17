@@ -8,7 +8,7 @@ CheapKZ is a single Node.js process that bundles four concerns: an HTTP API with
               └──────────────┘        │      SQLite (WAL)     │
               ┌──────────────┐        │  users · watchers ·   │
  Browser ────▶│ Fastify API  │───────▶│  offers · price_points│
-   (SPA)      │  + /metrics  │        │  alerts · kv · cache  │
+   (SPA)      │  + /metrics  │        │ alerts · proxies · kv │
               └──────────────┘        └──────────▲────────────┘
               ┌──────────────┐  runWatcher()     │
  tick (20 s)─▶│  Scheduler   │───────────────────┤
@@ -54,7 +54,8 @@ Defined as ordered migrations in `src/db/client.ts`, applied with `PRAGMA user_v
 - `offers` — latest snapshot of every listing seen (`UNIQUE(watcher_id, external_id)`)
 - `price_points` — time series of the best price per watcher (written only on change)
 - `alerts` — produced alerts and delivery state
-- `kv`, `cache` — cooldowns / counters and TTL cache for upstream API responses
+- `proxies` — per-proxy health stats
+- `kv` — key/value store for cooldowns, counters and a TTL cache (expiry encoded in the value) for upstream API responses
 
 Retention (`RETENTION_DAYS`) prunes old points and delivered alerts on a timer.
 
@@ -70,4 +71,4 @@ Retention (`RETENTION_DAYS`) prunes old points and delivered alerts on a timer.
 
 ## Testing strategy
 
-Vitest, 116 tests. The HTTP layer is tested against a real local server (redirect loops, 403 / 5xx / 404, oversized bodies) rather than mocks; adapters are tested against recorded fixtures in `fixtures/`; the API is tested through the Fastify app with a temporary SQLite database.
+Vitest, 116 tests. The HTTP layer is tested against a real local server (redirect loops, 403 / 5xx / 404, oversized bodies) rather than mocks; adapters are tested against recorded fixtures in `fixtures/`; the API is tested through the Fastify app with a temporary on-disk SQLite database.
