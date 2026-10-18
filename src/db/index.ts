@@ -190,8 +190,14 @@ export function upsertOffer(
   ).run(o.watcher_id, o.external_id, o.title, o.url, o.seller, o.price, o.old_price, o.currency, o.in_stock, o.meta_json)
 }
 
-export function countOffersSince(db: DB, iso: string): number {
-  return Number(db.prepare(`SELECT COUNT(*) AS n FROM offers WHERE seen_at >= ?`).get(iso)?.n ?? 0)
+/** Фильтр «только наблюдения пользователя» для агрегатов: без userId — по всем. */
+const ownedBy = (col: string, userId?: number | null): string =>
+  userId == null ? '' : ` AND ${col} IN (SELECT id FROM watchers WHERE user_id=${Number(userId)})`
+
+export function countOffersSince(db: DB, iso: string, userId?: number | null): number {
+  return Number(
+    db.prepare(`SELECT COUNT(*) AS n FROM offers WHERE seen_at >= ?${ownedBy('watcher_id', userId)}`).get(iso)?.n ?? 0
+  )
 }
 
 // ---------- price points ----------
@@ -302,8 +308,10 @@ export function markDigestSent(db: DB, ids: number[]): void {
   db.prepare(`UPDATE alerts SET digest_sent=1 WHERE id IN (${ids.map(() => '?').join(',')})`).run(...ids)
 }
 
-export function recentAlerts(db: DB, limit = 30): AlertRow[] {
-  return db.prepare(`SELECT * FROM alerts ORDER BY id DESC LIMIT ?`).all(limit) as AlertRow[]
+export function recentAlerts(db: DB, limit = 30, userId?: number | null): AlertRow[] {
+  return db
+    .prepare(`SELECT * FROM alerts WHERE 1=1${ownedBy('watcher_id', userId)} ORDER BY id DESC LIMIT ?`)
+    .all(limit) as AlertRow[]
 }
 
 export function undigestedForUser(db: DB, userId: number): AlertRow[] {
@@ -316,19 +324,25 @@ export function undigestedForUser(db: DB, userId: number): AlertRow[] {
     .all(userId) as AlertRow[]
 }
 
-export function alertsCountSince(db: DB, iso: string): number {
-  return Number(db.prepare(`SELECT COUNT(*) AS n FROM alerts WHERE created_at>=?`).get(iso)?.n ?? 0)
-}
-
-export function savingsSince(db: DB, iso: string): number {
+export function alertsCountSince(db: DB, iso: string, userId?: number | null): number {
   return Number(
-    db.prepare(`SELECT COALESCE(SUM(delta),0) AS s FROM alerts WHERE delta>0 AND created_at>=?`).get(iso)?.s ?? 0
+    db.prepare(`SELECT COUNT(*) AS n FROM alerts WHERE created_at>=?${ownedBy('watcher_id', userId)}`).get(iso)?.n ?? 0
   )
 }
 
-export function hotCountSince(db: DB, iso: string): number {
+export function savingsSince(db: DB, iso: string, userId?: number | null): number {
   return Number(
-    db.prepare(`SELECT COUNT(*) AS n FROM alerts WHERE level='hot' AND created_at>=?`).get(iso)?.n ?? 0
+    db
+      .prepare(`SELECT COALESCE(SUM(delta),0) AS s FROM alerts WHERE delta>0 AND created_at>=?${ownedBy('watcher_id', userId)}`)
+      .get(iso)?.s ?? 0
+  )
+}
+
+export function hotCountSince(db: DB, iso: string, userId?: number | null): number {
+  return Number(
+    db
+      .prepare(`SELECT COUNT(*) AS n FROM alerts WHERE level='hot' AND created_at>=?${ownedBy('watcher_id', userId)}`)
+      .get(iso)?.n ?? 0
   )
 }
 
@@ -374,6 +388,7 @@ export interface AnomalyQuery {
   source?: string
   zone?: string
   watcherId?: number
+  userId?: number | null
   limit?: number
 }
 
@@ -383,6 +398,7 @@ export function listAnomalies(db: DB, q: AnomalyQuery = {}): AnomalyRow[] {
   if (q.source) (where.push('source=?'), args.push(q.source))
   if (q.zone) (where.push('zone=?'), args.push(q.zone))
   if (q.watcherId != null) (where.push('watcher_id=?'), args.push(q.watcherId))
+  if (q.userId != null) (where.push('watcher_id IN (SELECT id FROM watchers WHERE user_id=?)'), args.push(q.userId))
   const sql = `SELECT * FROM anomalies ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY id DESC LIMIT ?`
   return db.prepare(sql).all(...args, q.limit ?? 50) as AnomalyRow[]
 }

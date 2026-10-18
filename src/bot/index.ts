@@ -10,6 +10,9 @@ import {
   updateWatcher,
   pointSeries,
   getWatcher,
+  listAnomalies,
+  alertsCountSince,
+  hotCountSince,
   type DB,
   type UserRow,
   type WatcherRow
@@ -50,13 +53,16 @@ const HELP = `<b>Как пользоваться</b>
 /drop id % — алерт при падении на N%
 /flights ALA NQZ 2026-09-12 [обратно] — билеты
 /hot — горячие сделки прямо сейчас
+/detector — сканы районов Krisha и категорий Kaspi
+/finds — последние находки детектора
+/app — открыть панель прямо в Telegram
 /stats — статистика
 /mute 2h — тишина на срок
 /digest 9 — сводка каждый день в 9:00
 /quiet 23:00 07:00 — тихие часы
 /delete id
 
-🗺 Детектор аномалий: в веб-панели выбери районы Krisha на карте или категории Kaspi — сюда будут приходить аномально дешёвые объявления и товары.
+🗺 Детектор аномалий: в панели (/app) выбери районы Krisha на карте или категории Kaspi — сюда будут приходить аномально дешёвые объявления и товары.
 
 Алгоритм «ЛОВИ СЕЙЧАС» 🔥 сам кричит, когда цена аномально хороша.`
 
@@ -98,6 +104,11 @@ function card(w: WatcherRow): string {
     (w.url ? `\n🔗 ${esc(w.url)}` : '') +
     err
   )
+}
+
+/** Кнопка Mini App: та же панель, что в браузере, но со своими данными пользователя. */
+function appKeyboard(url: string | null, text = '📊 Открыть панель'): InlineKeyboard | undefined {
+  return url ? new InlineKeyboard().webApp(text, url) : undefined
 }
 
 function rowsKeyboard(rows: WatcherRow[]) {
@@ -143,7 +154,53 @@ export function createBot(deps: BotDeps): Bot {
   }
 
   bot.command('start', async (ctx) => {
-    await ctx.reply(`👋 Привет! Я ${cfg.brand} — слежу за ценами по Казахстану и кричу «ЛОВИ СЕЙЧАС», когда падают.\n\nПришли ссылку с Kaspi / OLX / Krisha — и всё.\n\n${HELP}`, { parse_mode: 'HTML' })
+    await ctx.reply(`👋 Привет! Я ${cfg.brand} — слежу за ценами по Казахстану и кричу «ЛОВИ СЕЙЧАС», когда падают.\n\nПришли ссылку с Kaspi / OLX / Krisha — и всё.\n\n${HELP}`, {
+      parse_mode: 'HTML',
+      reply_markup: appKeyboard(cfg.webAppUrl)
+    })
+  })
+
+  bot.command('app', async (ctx) => {
+    if (!cfg.webAppUrl) {
+      return void ctx.reply('Панель в Telegram не настроена: владельцу бота нужно задать WEBAPP_URL (https) в .env.')
+    }
+    await ctx.reply('📊 Обзор, наблюдения, детектор на карте, радар и настройки — всё как на сайте, только твоё.', {
+      reply_markup: appKeyboard(cfg.webAppUrl)
+    })
+  })
+
+  bot.command('detector', async (ctx) => {
+    const user = userOf(ctx)
+    if (!user) return
+    const scans = listWatchers(db, user.id).filter((w) => isScanKind(w.kind))
+    if (!scans.length) {
+      return void ctx.reply('Сканов пока нет. Выбери районы Krisha на карте или категории Kaspi в панели — находки будут приходить сюда.', {
+        reply_markup: appKeyboard(cfg.webAppUrl, '🛰 Открыть детектор')
+      })
+    }
+    const lines = scans.map((w) => `${w.active ? '🟢' : '⏸'} <b>#${w.id}</b> ${esc(w.title)}\n   ${esc(w.best_title ?? 'ещё не запускался')} · ${timeAgoRu(w.last_run_at)}`)
+    await ctx.reply(`🛰 <b>Сканы детектора</b>\n\n${lines.join('\n')}`, {
+      parse_mode: 'HTML',
+      reply_markup: { inline_keyboard: rowsKeyboard(scans) }
+    })
+  })
+
+  bot.command('finds', async (ctx) => {
+    const user = userOf(ctx)
+    if (!user) return
+    const rows = listAnomalies(db, { userId: user.id, limit: 10 })
+    if (!rows.length) return void ctx.reply('Находок пока нет — детектор продолжает следить 🛰 (/detector)')
+    const lines = rows.map((a) => {
+      const icon = a.level === 'hot' ? '🔥' : '🌤'
+      const title = esc((a.title ?? 'без названия').slice(0, 70))
+      const link = a.url ? `<a href="${esc(a.url)}">${title}</a>` : title
+      return `${icon} −${Math.round(a.pct)}% · <b>${money(a.price)}</b>\n   ${link}${a.zone_label ? ` · ${esc(a.zone_label)}` : ''}`
+    })
+    await ctx.reply(`⚡ <b>Последние находки</b>\n\n${lines.join('\n\n')}`, {
+      parse_mode: 'HTML',
+      link_preview_options: { is_disabled: true },
+      reply_markup: appKeyboard(cfg.webAppUrl, '🛰 Вся лента')
+    })
   })
   bot.command('help', async (ctx) => ctx.reply(HELP, { parse_mode: 'HTML' }))
 
@@ -230,10 +287,12 @@ export function createBot(deps: BotDeps): Bot {
   bot.command('stats', async (ctx) => {
     const user = userOf(ctx)
     if (!user) return
-    const rows = listWatchers(db, user.id)
+    const all = listWatchers(db, user.id)
+    const rows = all.filter((w) => !isScanKind(w.kind))
+    const since = new Date(Date.now() - 86_400_000).toISOString().replace('T', ' ').slice(0, 19)
     await ctx.reply(
-      `📊 <b>Статистика</b>\nНаблюдений: ${rows.length} · активных: ${rows.filter((r) => r.active).length}\nГорячих сейчас: ${rows.filter((r) => r.last_level === 'hot').length}`,
-      { parse_mode: 'HTML' }
+      `📊 <b>Статистика</b>\nНаблюдений: ${rows.length} · активных: ${rows.filter((r) => r.active).length}\nГорячих сейчас: ${rows.filter((r) => r.active && r.last_level === 'hot').length}\nСканов детектора: ${all.length - rows.length}\nАлертов за 24ч: ${alertsCountSince(db, since, user.id)} (🔥 ${hotCountSince(db, since, user.id)})`,
+      { parse_mode: 'HTML', reply_markup: appKeyboard(cfg.webAppUrl) }
     )
   })
 
@@ -371,8 +430,11 @@ export function createBot(deps: BotDeps): Bot {
   // меню команд в клиенте Telegram — иначе про них знает только тот, кто читал /help
   void bot.api
     .setMyCommands([
+      { command: 'app', description: 'открыть панель' },
       { command: 'list', description: 'мои наблюдения' },
       { command: 'hot', description: 'горячие сделки сейчас' },
+      { command: 'detector', description: 'сканы районов и категорий' },
+      { command: 'finds', description: 'находки детектора' },
       { command: 'set', description: 'целевая цена: /set 12 199990' },
       { command: 'drop', description: 'алерт при падении: /drop 12 15' },
       { command: 'flights', description: 'билеты: /flights ALA NQZ 2026-09-12' },
@@ -384,6 +446,13 @@ export function createBot(deps: BotDeps): Bot {
       { command: 'help', description: 'справка' }
     ])
     .catch((e) => log.warn('не удалось задать меню команд', e))
+
+  // кнопка меню рядом с полем ввода сразу открывает Mini App
+  if (cfg.webAppUrl) {
+    void bot.api
+      .setChatMenuButton({ menu_button: { type: 'web_app', text: 'Панель', web_app: { url: cfg.webAppUrl } } })
+      .catch((e) => log.warn('не удалось задать кнопку Mini App', e))
+  }
 
   bot.catch((err) => log.error('bot error', err.error))
   return bot

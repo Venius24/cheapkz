@@ -7,6 +7,8 @@ export interface Config {
   brand: string
   port: number
   baseUrl: string
+  /** HTTPS-адрес панели для Telegram Mini App; пусто — кнопка «Открыть панель» в боте не показывается. */
+  webAppUrl: string | null
   dataDir: string
   dbPath: string
   adminToken: string | null
@@ -53,6 +55,12 @@ function parseDelay(v: string | undefined): [number, number] {
   return [900, 2400]
 }
 
+/** Telegram открывает Mini App только по HTTPS: без явного WEBAPP_URL берём BASE_URL, если он https. */
+function webAppUrlOf(explicit: string | undefined, base: string | undefined): string | null {
+  const v = (explicit?.trim() || base?.trim() || '').replace(/\/+$/, '')
+  return /^https:\/\//i.test(v) ? v : null
+}
+
 export function loadConfig(overrides: Partial<Config> = {}): Config {
   const dataDir = process.env.DATA_DIR ?? path.resolve('data')
   const cfg: Config = {
@@ -61,6 +69,7 @@ export function loadConfig(overrides: Partial<Config> = {}): Config {
     brand: process.env.BRAND_NAME ?? 'CheapKZ',
     port: Number(process.env.PORT ?? 8080),
     baseUrl: (process.env.BASE_URL ?? `http://localhost:${process.env.PORT ?? 8080}`).replace(/\/+$/, ''),
+    webAppUrl: webAppUrlOf(process.env.WEBAPP_URL, process.env.BASE_URL),
     dataDir,
     dbPath: process.env.DB_PATH ?? path.join(dataDir, 'cheapkz.db'),
     adminToken: process.env.ADMIN_TOKEN?.trim() || null,

@@ -17,6 +17,7 @@ import { median } from '../core/anomaly.js'
 import { MARKET_WINDOW_DAYS } from '../worker/scan.js'
 import type { Scheduler } from '../worker/index.js'
 import { safeJson, timeAgoRu } from '../util.js'
+import { canSee } from './auth.js'
 
 interface DetectorDeps {
   db: DB
@@ -118,9 +119,9 @@ export function registerDetectorRoutes(app: FastifyInstance, { db, scheduler }: 
     categories: KASPI_CATEGORIES
   }))
 
-  app.get('/api/detector/scans', async () => {
+  app.get('/api/detector/scans', async (req) => {
     const c = counts7d()
-    return listWatchers(db)
+    return listWatchers(db, req.viewer.userId ?? undefined)
       .filter((w) => isScanKind(w.kind))
       .map((w) => shapeScan(w, c))
   })
@@ -131,7 +132,7 @@ export function registerDetectorRoutes(app: FastifyInstance, { db, scheduler }: 
     try {
       const { params, title } = normalizeScan(kind, (b.params ?? {}) as Record<string, unknown>)
       const w = createWatcher(db, {
-        user_id: ensureLocalUser(db),
+        user_id: req.viewer.userId ?? ensureLocalUser(db),
         kind,
         title: String(b.title ?? '').trim().slice(0, 120) || title,
         url: '',
@@ -149,7 +150,7 @@ export function registerDetectorRoutes(app: FastifyInstance, { db, scheduler }: 
   app.put('/api/detector/scans/:id', async (req, reply) => {
     const id = Number((req.params as { id: string }).id)
     const w = getWatcher(db, id)
-    if (!w || !isScanKind(w.kind)) return reply.code(404).send({ error: 'скан не найден' })
+    if (!canSee(req.viewer, w) || !isScanKind(w.kind)) return reply.code(404).send({ error: 'скан не найден' })
     const b = (req.body ?? {}) as Record<string, unknown>
     const patch: Record<string, unknown> = {}
     try {
@@ -177,6 +178,7 @@ export function registerDetectorRoutes(app: FastifyInstance, { db, scheduler }: 
       source: q.source === 'krisha' || q.source === 'kaspi' ? q.source : undefined,
       zone: q.zone || undefined,
       watcherId: q.watcher ? Number(q.watcher) : undefined,
+      userId: req.viewer.userId,
       limit
     }).map((a) => ({
       ...a,
