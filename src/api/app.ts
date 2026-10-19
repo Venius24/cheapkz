@@ -1,9 +1,8 @@
-import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify'
+import Fastify, { type FastifyInstance, type FastifyReply } from 'fastify'
 import cors from '@fastify/cors'
 import fastifyStatic from '@fastify/static'
 import fs from 'node:fs'
 import path from 'node:path'
-import crypto from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import type { Config } from '../config.js'
 import {
@@ -23,8 +22,11 @@ import {
   kvDeletePrefix,
   ensureLocalUser,
   statGetNum,
+  getUserById,
+  updateUser,
   type DB
 } from '../db/index.js'
+import { canSee, resolveViewer, type Viewer } from './auth.js'
 import { HttpGuard } from '../http/client.js'
 import { detectKind } from '../sources/index.js'
 import { isScanKind } from '../sources/scan.js'
@@ -44,48 +46,75 @@ const moduleDir = path.dirname(fileURLToPath(import.meta.url))
 const KINDS = new Set(['kaspi', 'olx', 'krisha', 'flights', 'generic'])
 const SETTING_KEYS = new Set(['default_interval_min', 'quiet_from', 'quiet_to'])
 
-/**
- * Сравнение через SHA-256: буферы всегда одной длины (timingSafeEqual падает
- * на разной) и время ответа не выдаёт длину настоящего токена.
- */
-function sameSecret(a: string, b: string): boolean {
-  const ha = crypto.createHash('sha256').update(a).digest()
-  const hb = crypto.createHash('sha256').update(b).digest()
-  return crypto.timingSafeEqual(ha, hb)
-}
-
-function authorized(req: FastifyRequest, cfg: Config): boolean {
-  if (!cfg.adminToken) {
-    const ip = req.ip.replace('::ffff:', '')
-    return ip === '127.0.0.1' || ip === '::1'
-  }
-  const header = req.headers.authorization ?? ''
-  const token = header.startsWith('Bearer ')
-    ? header.slice(7).trim()
-    : new URLSearchParams(req.url.split('?')[1] ?? '').get('token') ?? ''
-  if (!token) return false
-  return sameSecret(token, cfg.adminToken)
-}
+/** Пути, закрытые для пользователей Mini App: системная телеметрия и админка. */
+const ADMIN_ONLY = ['/metrics', '/api/admin/', '/api/settings']
 
 export function createApp(deps: AppDeps): FastifyInstance {
   const app = Fastify({ logger: false })
   const { db, cfg, guard, scheduler } = deps
 
   app.register(cors, { origin: true })
+  app.decorateRequest('viewer', null as never)
 
   app.addHook('onRequest', async (req, reply) => {
     const url = req.url.split('?')[0]
     if (!url.startsWith('/api') && url !== '/metrics') return
     if (url === '/health') return
-    if (!authorized(req, cfg)) {
+    const viewer = resolveViewer(req, cfg, db)
+    if (!viewer) {
       return reply.code(401).send({ error: 'unauthorized: задайте заголовок Authorization: Bearer <ADMIN_TOKEN>' })
     }
+    if (viewer.mode !== 'admin' && ADMIN_ONLY.some((p) => url.startsWith(p))) {
+      return reply.code(403).send({ error: 'доступно только администратору' })
+    }
+    req.viewer = viewer
   })
 
   // ---------- служебные ----------
   app.get('/health', async () => ({ ok: true, version: cfg.version, brand: cfg.brand, uptimeSec: Math.round(process.uptime()) }))
 
-  app.get('/api/system', async () => ({
+  /** Кто я: режим панели и личные настройки уведомлений (для Mini App). */
+  app.get('/api/me', async (req) => shapeMe(req.viewer))
+
+  app.patch('/api/me', async (req, reply) => {
+    const v = req.viewer
+    if (v.mode !== 'telegram') return reply.code(400).send({ error: 'личные настройки есть только у пользователя Telegram' })
+    const b = (req.body ?? {}) as Record<string, unknown>
+    const patch: Record<string, unknown> = {}
+    const hhmm = (x: unknown): string | null => {
+      const m = String(x ?? '').match(/^(\d{1,2}):(\d{2})$/)
+      return m && Number(m[1]) < 24 && Number(m[2]) < 60 ? `${m[1].padStart(2, '0')}:${m[2]}` : null
+    }
+    if ('quiet_from' in b || 'quiet_to' in b) {
+      const from = hhmm(b.quiet_from)
+      const to = hhmm(b.quiet_to)
+      if ((b.quiet_from || b.quiet_to) && (!from || !to)) return reply.code(400).send({ error: 'тихие часы — в формате HH:MM' })
+      patch.quiet_from = from
+      patch.quiet_to = to
+    }
+    if ('digest_hour' in b) {
+      const h = b.digest_hour == null || b.digest_hour === '' ? null : Number(b.digest_hour)
+      if (h != null && !(Number.isInteger(h) && h >= 0 && h <= 23)) return reply.code(400).send({ error: 'час дайджеста — 0…23' })
+      patch.digest_hour = h
+    }
+    if ('mute_minutes' in b) {
+      const m = Number(b.mute_minutes)
+      patch.muted_until = Number.isFinite(m) && m > 0 ? new Date(Date.now() + Math.min(m, 30 * 1440) * 60_000).toISOString() : null
+    }
+    if ('break_quiet_on_hot' in b) patch.break_quiet_on_hot = b.break_quiet_on_hot ? 1 : 0
+    updateUser(db, v.userId, patch)
+    return shapeMe(v)
+  })
+
+  app.get('/api/system', async (req) => {
+    // пользователю Mini App — без прокси, токенов и счётчиков: это телеметрия владельца
+    if (req.viewer.mode !== 'admin') {
+      return { brand: cfg.brand, version: cfg.version, timezone: cfg.timezone, uptimeSec: Math.round(process.uptime()) }
+    }
+    return systemInfo()
+  })
+
+  const systemInfo = () => ({
     brand: cfg.brand,
     version: cfg.version,
     timezone: cfg.timezone,
@@ -96,7 +125,7 @@ export function createApp(deps: AppDeps): FastifyInstance {
     scheduler: scheduler ? scheduler.stats() : null,
     requestsTotal: statGetNum(db, 'stat:requests'),
     blockedTotal: statGetNum(db, 'stat:blocked')
-  }))
+  })
 
   app.get('/metrics', async (_req, reply) => {
     const watchers = listWatchers(db)
@@ -130,16 +159,17 @@ export function createApp(deps: AppDeps): FastifyInstance {
   })
 
   // ---------- статистика ----------
-  app.get('/api/stats', async () => {
-    const watchers = listWatchers(db)
+  app.get('/api/stats', async (req) => {
+    const uid = req.viewer.userId
+    const watchers = listWatchers(db, uid ?? undefined).filter((w) => !isScanKind(w.kind))
     return {
       watchers: watchers.length,
       active: watchers.filter((w) => w.active).length,
       hot: watchers.filter((w) => w.last_level === 'hot' && w.active).length,
-      alerts24h: alertsCountSince(db, iso24hAgo()),
-      offers24h: countOffersSince(db, iso24hAgo()),
-      hotAlerts24h: hotCountSince(db, iso24hAgo()),
-      savings24h: Math.round(savingsSince(db, iso24hAgo()))
+      alerts24h: alertsCountSince(db, iso24hAgo(), uid),
+      offers24h: countOffersSince(db, iso24hAgo(), uid),
+      hotAlerts24h: hotCountSince(db, iso24hAgo(), uid),
+      savings24h: Math.round(savingsSince(db, iso24hAgo(), uid))
     }
   })
 
@@ -157,7 +187,7 @@ export function createApp(deps: AppDeps): FastifyInstance {
   })
 
   // ---------- watchers ----------
-  app.get('/api/watchers', async () => listWatchers(db).map(shapeWatcher))
+  app.get('/api/watchers', async (req) => listWatchers(db, req.viewer.userId ?? undefined).map(shapeWatcher))
 
   app.post('/api/watchers', async (req, reply) => {
     const b = (req.body ?? {}) as Record<string, unknown>
@@ -179,7 +209,7 @@ export function createApp(deps: AppDeps): FastifyInstance {
       }
     }
 
-    const userId = Number(b.user_id ?? ensureLocalUser(db))
+    const userId = req.viewer.userId ?? Number(b.user_id ?? ensureLocalUser(db))
 
     const w = createWatcher(db, {
       user_id: userId,
@@ -198,7 +228,7 @@ export function createApp(deps: AppDeps): FastifyInstance {
   app.patch('/api/watchers/:id', async (req, reply) => {
     const id = Number((req.params as { id: string }).id)
     const w = getWatcher(db, id)
-    if (!w) return reply.code(404).send({ error: 'не найдено' })
+    if (!canSee(req.viewer, w)) return reply.code(404).send({ error: 'не найдено' })
     const b = (req.body ?? {}) as Record<string, unknown>
     const patch: Record<string, unknown> = {}
     if (b.title != null) patch.title = String(b.title).slice(0, 120)
@@ -214,6 +244,7 @@ export function createApp(deps: AppDeps): FastifyInstance {
 
   app.delete('/api/watchers/:id', async (req, reply) => {
     const id = Number((req.params as { id: string }).id)
+    if (!canSee(req.viewer, getWatcher(db, id))) return reply.code(404).send({ error: 'не найдено' })
     if (!deleteWatcherCascade(db, id)) return reply.code(404).send({ error: 'не найдено' })
     return { deleted: id }
   })
@@ -221,7 +252,7 @@ export function createApp(deps: AppDeps): FastifyInstance {
   app.post('/api/watchers/:id/run', async (req, reply) => {
     const id = Number((req.params as { id: string }).id)
     if (!scheduler) return reply.code(503).send({ error: 'планировщик не запущен' })
-    if (!getWatcher(db, id)) return reply.code(404).send({ error: 'не найдено' })
+    if (!canSee(req.viewer, getWatcher(db, id))) return reply.code(404).send({ error: 'не найдено' })
     let timer: NodeJS.Timeout | undefined
     try {
       const r = await Promise.race([
@@ -238,8 +269,9 @@ export function createApp(deps: AppDeps): FastifyInstance {
     }
   })
 
-  app.get('/api/watchers/:id/history', async (req) => {
+  app.get('/api/watchers/:id/history', async (req, reply) => {
     const id = Number((req.params as { id: string }).id)
+    if (!canSee(req.viewer, getWatcher(db, id))) return reply.code(404).send({ error: 'не найдено' })
     const days = clampInt((req.query as { days?: string }).days, 1, 365, 30)
     const series = pointSeries(db, id, days)
     const values = series.map((p) => p.p)
@@ -255,7 +287,7 @@ export function createApp(deps: AppDeps): FastifyInstance {
   // ---------- алерты / сделки ----------
   app.get('/api/alerts', async (req) => {
     const limit = clampInt((req.query as { limit?: string }).limit, 1, 200, 30)
-    return recentAlerts(db, limit).map((a) => {
+    return recentAlerts(db, limit, req.viewer.userId).map((a) => {
       const w = getWatcher(db, a.watcher_id)
       return { ...a, watcher_title: w?.title, watcher_kind: w?.kind, ago: timeAgoRu(a.created_at) }
     })
@@ -265,7 +297,7 @@ export function createApp(deps: AppDeps): FastifyInstance {
     const q = req.query as { level?: string; kind?: string; limit?: string }
     const limit = clampInt(q.limit, 1, 200, 100)
     // сканы детектора не имеют «лучшей цены» — их находки живут в /api/detector/anomalies
-    let rows = listWatchers(db).filter((w) => w.last_price != null && !isScanKind(w.kind))
+    let rows = listWatchers(db, req.viewer.userId ?? undefined).filter((w) => w.last_price != null && !isScanKind(w.kind))
     if (q.level) rows = rows.filter((w) => w.last_level === q.level)
     if (q.kind) rows = rows.filter((w) => w.kind === q.kind)
     rows.sort((a, b) => (b.last_score ?? 0) - (a.last_score ?? 0))
@@ -331,6 +363,26 @@ export function createApp(deps: AppDeps): FastifyInstance {
   })
 
   // ---------- helpers ----------
+  function shapeMe(v: Viewer) {
+    const base = { brand: cfg.brand, timezone: cfg.timezone, version: cfg.version, botEnabled: Boolean(cfg.telegramToken) }
+    if (v.mode === 'admin') return { ...base, mode: 'admin' as const, user: null }
+    const u = getUserById(db, v.userId)
+    const muted = u?.muted_until && new Date(u.muted_until).getTime() > Date.now() ? u.muted_until : null
+    return {
+      ...base,
+      mode: 'telegram' as const,
+      user: {
+        id: v.userId,
+        username: u?.username ?? v.username,
+        quiet_from: u?.quiet_from ?? null,
+        quiet_to: u?.quiet_to ?? null,
+        digest_hour: u?.digest_hour ?? null,
+        muted_until: muted,
+        break_quiet_on_hot: Boolean(u?.break_quiet_on_hot ?? 1)
+      }
+    }
+  }
+
   function shapeWatcher(w: NonNullable<ReturnType<typeof getWatcher>>) {
     return {
       id: w.id,

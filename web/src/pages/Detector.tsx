@@ -9,7 +9,21 @@ import {
   type Scan,
   type ZoneStat
 } from '../api'
-import { Card, EmptyState, useInterval, useToast } from '../ui'
+import {
+  Card,
+  EmptyState,
+  ErrorState,
+  PageSkeleton,
+  RefreshButton,
+  Skeleton,
+  Spinner,
+  StaleBanner,
+  errorText,
+  useInterval,
+  useResource,
+  useToast
+} from '../ui'
+import { confirmAsk, haptic } from '../tg'
 import DistrictMap from '../components/DistrictMap'
 
 type Source = 'krisha' | 'kaspi'
@@ -165,10 +179,12 @@ function KrishaEditor({
       if (draft.id) await detector.updateScan(draft.id, { params, interval_min: draft.interval_min })
       else await detector.createScan({ kind: 'krisha_zone', params, interval_min: draft.interval_min })
       toast(draft.id ? 'Скан обновлён' : '🛰 Детектор запущен — первый проход уже идёт')
+      haptic.ok()
       setDraft(emptyKrisha(draft.city))
       onSaved()
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'ошибка', true)
+      haptic.bad()
+      toast(errorText(e), true)
     } finally {
       setBusy(false)
     }
@@ -200,7 +216,7 @@ function KrishaEditor({
             </button>
           </div>
         </div>
-        <div className="h-[520px]">
+        <div className="h-[360px] sm:h-[520px]">
           <DistrictMap city={city} selected={draft.districts} watched={watched} stats={stats} unitLabel={unitLabel} onToggle={toggle} />
         </div>
       </div>
@@ -289,7 +305,7 @@ function KrishaEditor({
         </div>
 
         <button className="btn-primary w-full" disabled={busy || !draft.districts.size} onClick={save}>
-          {busy ? 'Сохраняю…' : draft.id ? 'Сохранить изменения' : `Запустить детектор${draft.districts.size ? ` · ${draft.districts.size} р-н.` : ''}`}
+          {busy && <Spinner />} {busy ? 'Сохраняю…' : draft.id ? 'Сохранить изменения' : `Запустить детектор${draft.districts.size ? ` · ${draft.districts.size} р-н.` : ''}`}
         </button>
         {requests > 0 && <p className="-mt-2 text-center text-[11px] text-white/30">≈ {requests} запросов к Krisha за проход — с паузами, без спешки</p>}
       </Card>
@@ -373,10 +389,12 @@ function KaspiEditor({
       if (draft.id) await detector.updateScan(draft.id, { params, interval_min: draft.interval_min })
       else await detector.createScan({ kind: 'kaspi_category', params, interval_min: draft.interval_min })
       toast(draft.id ? 'Скан обновлён' : '🛰 Детектор Kaspi запущен — первый проход соберёт базовые цены')
+      haptic.ok()
       setDraft(emptyKaspi())
       onSaved()
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'ошибка', true)
+      haptic.bad()
+      toast(errorText(e), true)
     } finally {
       setBusy(false)
     }
@@ -478,7 +496,7 @@ function KaspiEditor({
           </div>
         </div>
         <button className="btn-primary w-full" disabled={busy || (!broad && !draft.categories.size)} onClick={save}>
-          {busy ? 'Сохраняю…' : draft.id ? 'Сохранить изменения' : 'Запустить детектор'}
+          {busy && <Spinner />} {busy ? 'Сохраняю…' : draft.id ? 'Сохранить изменения' : 'Запустить детектор'}
         </button>
         <p className="-mt-2 text-center text-[11px] text-white/30">Первый проход запоминает цены, аномалии — со второго</p>
       </Card>
@@ -489,28 +507,38 @@ function KaspiEditor({
 // ---------- список сканов и лента ----------
 
 function ScanRow({ s, onEdit, onChanged, toast }: { s: Scan; onEdit: () => void; onChanged: () => void; toast: Toast }) {
-  const [busy, setBusy] = useState(false)
-  const run = async () => {
-    setBusy(true)
+  const [busy, setBusy] = useState<'run' | 'pause' | 'del' | null>(null)
+  const act = async (kind: 'run' | 'pause' | 'del', fn: () => Promise<string>) => {
+    setBusy(kind)
     try {
-      const r = (await api.runWatcher(s.id)) as { offers: number; alerts: number; anomalies?: number }
-      toast(`#${s.id}: просмотрено ${r.offers}, аномалий ${r.anomalies ?? 0}`)
+      toast(await fn())
+      haptic.ok()
       onChanged()
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'ошибка', true)
+      haptic.bad()
+      toast(errorText(e), true)
     } finally {
-      setBusy(false)
+      setBusy(null)
     }
   }
-  const pause = async () => {
-    await detector.updateScan(s.id, { active: !s.active })
-    onChanged()
-  }
+  const run = () =>
+    act('run', async () => {
+      const r = await api.runWatcher(s.id)
+      return `#${s.id}: просмотрено ${r.offers}, аномалий ${r.anomalies ?? 0}`
+    })
+  const pause = () =>
+    act('pause', async () => {
+      await detector.updateScan(s.id, { active: !s.active })
+      return s.active ? 'Скан на паузе ⏸' : 'Скан возобновлён ▶'
+    })
   const del = async () => {
-    if (!confirm(`Удалить «${s.title}» вместе с его находками?`)) return
-    await api.deleteWatcher(s.id)
-    onChanged()
+    if (!(await confirmAsk(`Удалить «${s.title}» вместе с его находками?`))) return
+    await act('del', async () => {
+      await api.deleteWatcher(s.id)
+      return 'Скан удалён 🗑'
+    })
   }
+  const spin = <Spinner className="!h-3 !w-3" />
   return (
     <div className="flex flex-wrap items-center gap-3 border-b border-white/5 px-4 py-3 last:border-0">
       <span className={`h-2 w-2 shrink-0 rounded-full ${!s.active ? 'bg-white/20' : s.last_error ? 'bg-hot' : 'animate-pulseHot bg-ok'}`} />
@@ -522,10 +550,10 @@ function ScanRow({ s, onEdit, onChanged, toast }: { s: Scan; onEdit: () => void;
       </div>
       {s.anomalies7d > 0 && <span className="chip border border-hot/30 bg-hot/15 text-hot">🔥 {s.anomalies7d} за 7 дн.</span>}
       <div className="flex gap-1">
-        <button className="btn-ghost !px-2.5 !py-1 text-xs" onClick={onEdit} title="Изменить">✏️</button>
-        <button className="btn-ghost !px-2.5 !py-1 text-xs" onClick={run} disabled={busy} title="Проверить сейчас">{busy ? '…' : '↻'}</button>
-        <button className="btn-ghost !px-2.5 !py-1 text-xs" onClick={pause} title={s.active ? 'Пауза' : 'Возобновить'}>{s.active ? '⏸' : '▶'}</button>
-        <button className="btn-danger !px-2.5 !py-1 text-xs" onClick={del} title="Удалить">🗑</button>
+        <button className="btn-ghost !px-2.5 !py-1 text-xs" onClick={onEdit} disabled={busy != null} title="Изменить">✏️</button>
+        <button className="btn-ghost !px-2.5 !py-1 text-xs" onClick={run} disabled={busy != null} title="Проверить сейчас">{busy === 'run' ? spin : '↻'}</button>
+        <button className="btn-ghost !px-2.5 !py-1 text-xs" onClick={pause} disabled={busy != null} title={s.active ? 'Пауза' : 'Возобновить'}>{busy === 'pause' ? spin : s.active ? '⏸' : '▶'}</button>
+        <button className="btn-danger !px-2.5 !py-1 text-xs" onClick={del} disabled={busy != null} title="Удалить">{busy === 'del' ? spin : '🗑'}</button>
       </div>
     </div>
   )
@@ -579,39 +607,23 @@ function AnomalyCard({ a }: { a: Anomaly }) {
 }
 
 export default function Detector() {
-  const [catalog, setCatalog] = useState<DetectorCatalog | null>(null)
-  const [scans, setScans] = useState<Scan[]>([])
-  const [feed, setFeed] = useState<Anomaly[] | null>(null)
   const [source, setSource] = useState<Source>('krisha')
   const [feedFilter, setFeedFilter] = useState<'all' | Source>('all')
   const [krisha, setKrisha] = useState<KrishaDraft>(emptyKrisha('almaty'))
   const [kaspi, setKaspi] = useState<KaspiDraft>(emptyKaspi())
   const { show, node } = useToast()
 
-  const loadScans = () => detector.scans().then(setScans).catch(() => {})
-  const loadFeed = () =>
-    detector
-      .anomalies(feedFilter === 'all' ? undefined : feedFilter, 60)
-      .then(setFeed)
-      .catch(() => setFeed([]))
-
-  useEffect(() => {
-    detector.catalog().then(setCatalog).catch((e) => show(e instanceof Error ? e.message : 'ошибка', true))
-    void loadScans()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-  useEffect(() => {
-    void loadFeed()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [feedFilter])
-  useInterval(() => {
-    void loadScans()
-    void loadFeed()
-  }, 30_000)
+  // каталог районов и категорий — без него редакторы не нарисовать
+  const cat = useResource(() => detector.catalog(), [])
+  const scansRes = useResource(() => detector.scans(), [], { refreshMs: 30_000 })
+  const feedRes = useResource(() => detector.anomalies(feedFilter === 'all' ? undefined : feedFilter, 60), [feedFilter], { refreshMs: 30_000 })
+  const catalog: DetectorCatalog | null = cat.data
+  const scans: Scan[] = scansRes.data ?? []
+  const feed: Anomaly[] | null = feedRes.data
 
   const refresh = () => {
-    void loadScans()
-    void loadFeed()
+    void scansRes.reload()
+    void feedRes.reload()
   }
   const edit = (s: Scan) => {
     if (s.kind === 'krisha_zone') {
@@ -624,7 +636,7 @@ export default function Detector() {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
-  if (!catalog) return <div className="py-20 text-center text-white/30">Загрузка…</div>
+  if (!catalog) return cat.error ? <ErrorState error={cat.error} onRetry={cat.reload} retrying={cat.loading} /> : <PageSkeleton cards={2} />
 
   const hot24 = (feed ?? []).filter((a) => a.level === 'hot' && Date.now() - new Date(`${a.created_at.replace(' ', 'T')}Z`).getTime() < 86_400_000).length
   const ownScans = scans.filter((s) => (source === 'krisha' ? s.kind === 'krisha_zone' : s.kind === 'kaspi_category'))
@@ -640,7 +652,8 @@ export default function Detector() {
             {hot24 ? <span className="text-hot"> · 🔥 {hot24} горячих за сутки</span> : null}
           </p>
         </div>
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
+          <RefreshButton res={feedRes} />
           <Segmented
             value={source}
             options={[
@@ -681,14 +694,23 @@ export default function Detector() {
           </button>
         ))}
       </div>
-      {feed && feed.length === 0 ? (
+      {feedRes.error != null && <StaleBanner error={feedRes.error} onRetry={feedRes.reload} />}
+      {!feed ? (
+        feedRes.error ? null : (
+          <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
+            {Array.from({ length: 4 }, (_, i) => (
+              <Skeleton key={i} className="h-28" />
+            ))}
+          </div>
+        )
+      ) : feed.length === 0 ? (
         <EmptyState
           icon="🛰"
           text={scans.length ? 'Пока тихо: аномалий не найдено. Детектор продолжает следить.' : 'Выберите районы на карте или категории Kaspi и запустите детектор — находки появятся здесь и в Telegram.'}
         />
       ) : (
         <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
-          {(feed ?? []).map((a) => (
+          {feed.map((a) => (
             <AnomalyCard key={a.id} a={a} />
           ))}
         </div>

@@ -1,50 +1,58 @@
-import { useEffect, useState } from 'react'
-import { api, fmtMoney, type Stats, type Deal, type AlertRow } from '../api'
-import { Card, LevelChip, ScoreBar, KindBadge, EmptyState, useInterval } from '../ui'
+import { api, fmtMoney } from '../api'
+import { Card, LevelChip, ScoreBar, KindBadge, EmptyState, ErrorState, PageHeader, PageSkeleton, RefreshButton, StaleBanner, useResource } from '../ui'
 
-function StatCard({ label, value, sub, accent }: { label: string; value: string; sub?: string; accent?: string }) {
+function StatCard({ label, value, sub, accent, onClick }: { label: string; value: string; sub?: string; accent?: string; onClick?: () => void }) {
   return (
-    <Card className="flex flex-col gap-1">
+    <button onClick={onClick} className="glass glass-hover flex animate-fadeUp flex-col gap-1 p-5 text-left">
       <span className="text-xs uppercase tracking-wider text-white/40">{label}</span>
       <span className={`text-2xl font-bold ${accent ?? ''}`}>{value}</span>
       {sub && <span className="text-xs text-white/35">{sub}</span>}
-    </Card>
+    </button>
   )
 }
 
+const loadAll = async () => {
+  const [stats, deals, alerts] = await Promise.all([api.stats(), api.deals(8), api.alerts(12)])
+  return { stats, hot: deals.filter((x) => x.level === 'hot'), alerts }
+}
+
 export default function Dashboard({ go }: { go: (tab: string) => void }) {
-  const [stats, setStats] = useState<Stats | null>(null)
-  const [hot, setHot] = useState<Deal[]>([])
-  const [alerts, setAlerts] = useState<AlertRow[]>([])
+  const res = useResource(loadAll, [], { refreshMs: 30_000 })
 
-  const load = () => {
-    api.stats().then(setStats).catch(() => {})
-    api.deals(8).then((d) => setHot(d.filter((x) => x.level === 'hot'))).catch(() => {})
-    api.alerts(12).then(setAlerts).catch(() => {})
-  }
-  useEffect(load, [])
-  useInterval(load, 30_000)
-
-  if (!stats) return <div className="py-20 text-center text-white/30">Загрузка…</div>
+  if (!res.data) return res.error ? <ErrorState error={res.error} onRetry={res.reload} retrying={res.loading} /> : <PageSkeleton stats cards={3} />
+  const { stats, hot, alerts } = res.data
 
   return (
     <div className="space-y-6">
+      <PageHeader title="📊 Обзор" sub="Сводка за последние 24 часа">
+        <RefreshButton res={res} />
+      </PageHeader>
+      {res.error != null && <StaleBanner error={res.error} onRetry={res.reload} />}
+
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard label="Наблюдений" value={`${stats.active} / ${stats.watchers}`} sub="активных / всего" />
-        <StatCard
-          label="🔥 Горячих сейчас"
-          value={String(stats.hot)}
-          accent={stats.hot > 0 ? 'text-hot' : ''}
-          sub="лови сейчас"
-        />
+        <StatCard label="Наблюдений" value={`${stats.active} / ${stats.watchers}`} sub="активных / всего" onClick={() => go('watchers')} />
+        <StatCard label="🔥 Горячих сейчас" value={String(stats.hot)} accent={stats.hot > 0 ? 'text-hot' : ''} sub="лови сейчас" onClick={() => go('radar')} />
         <StatCard label="Алертов за 24ч" value={String(stats.alerts24h)} sub={`горячих: ${stats.hotAlerts24h}`} />
-        <StatCard
-          label="Экономия за 24ч"
-          value={fmtMoney(stats.savings24h)}
-          accent="text-ok"
-          sub={`проверок цен: ${stats.offers24h}`}
-        />
+        <StatCard label="Экономия за 24ч" value={fmtMoney(stats.savings24h)} accent="text-ok" sub={`проверок цен: ${stats.offers24h}`} />
       </div>
+
+      {stats.watchers === 0 && (
+        <Card className="flex flex-col items-start gap-3 border-vio/30 sm:flex-row sm:items-center">
+          <div className="text-3xl">👋</div>
+          <div className="flex-1">
+            <div className="font-semibold">Начните с первой ссылки</div>
+            <p className="text-sm text-white/45">Вставьте товар Kaspi, поиск OLX или выдачу Krisha — CheapKZ будет проверять цену и напишет, когда пора брать.</p>
+          </div>
+          <div className="flex gap-2">
+            <button className="btn-primary" onClick={() => go('watchers')}>
+              ＋ Добавить наблюдение
+            </button>
+            <button className="btn-ghost" onClick={() => go('detector')}>
+              🛰 Детектор
+            </button>
+          </div>
+        </Card>
+      )}
 
       <section>
         <div className="mb-3 flex items-center justify-between">
@@ -68,11 +76,11 @@ export default function Dashboard({ go }: { go: (tab: string) => void }) {
                 </a>
                 <div className="mt-2 flex items-end justify-between">
                   <span className="text-xl font-bold">{fmtMoney(d.price)}</span>
-                  {d.prev != null && d.prev > (d.price ?? 0) && (
-                    <span className="text-xs text-ok">было {fmtMoney(d.prev)}</span>
-                  )}
+                  {d.prev != null && d.prev > (d.price ?? 0) && <span className="text-xs text-ok">было {fmtMoney(d.prev)}</span>}
                 </div>
-                <div className="mt-2"><ScoreBar score={d.score} /></div>
+                <div className="mt-2">
+                  <ScoreBar score={d.score} />
+                </div>
               </Card>
             ))}
           </div>
@@ -82,25 +90,25 @@ export default function Dashboard({ go }: { go: (tab: string) => void }) {
       <section>
         <h2 className="mb-3 text-lg font-semibold">📜 Последние алерты</h2>
         {alerts.length === 0 ? (
-          <EmptyState icon="📭" text="Алертов пока нет." />
+          <EmptyState icon="📭" text="Алертов пока нет. Они появятся, когда цена достигнет цели или резко упадёт." />
         ) : (
-          <Card className="!p-0 overflow-hidden">
-            <table className="w-full text-sm">
-              <tbody>
-                {alerts.map((a) => (
-                  <tr key={a.id} className="border-b border-white/5 last:border-0 hover:bg-white/[0.03]">
-                    <td className="px-4 py-3 w-10">{a.level === 'hot' ? '🔥' : a.level === 'warm' ? '🌤' : '❄️'}</td>
-                    <td className="px-2 py-3 text-white/70">{a.watcher_title ?? `#${a.watcher_id}`}</td>
-                    <td className="px-2 py-3 hidden sm:table-cell text-white/40">{a.rule}</td>
-                    <td className="px-2 py-3 text-right whitespace-nowrap">{fmtMoney(a.price)}</td>
-                    {a.delta != null && a.delta > 0 && (
-                      <td className="px-2 py-3 text-right text-ok whitespace-nowrap">−{Math.round(a.delta)}%</td>
-                    )}
-                    <td className="px-4 py-3 text-right text-xs text-white/30 whitespace-nowrap">{a.ago}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <Card className="overflow-hidden !p-0">
+            <ul>
+              {alerts.map((a) => (
+                <li key={a.id} className="flex items-center gap-3 border-b border-white/5 px-4 py-3 text-sm last:border-0 hover:bg-white/[0.03]">
+                  <span>{a.level === 'hot' ? '🔥' : a.level === 'warm' ? '🌤' : '❄️'}</span>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-white/80">{a.watcher_title ?? `#${a.watcher_id}`}</div>
+                    <div className="truncate text-xs text-white/35">{a.rule}</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="whitespace-nowrap font-semibold">{fmtMoney(a.price)}</div>
+                    {a.delta != null && a.delta > 0 && <div className="text-xs text-ok">−{Math.round(a.delta)}%</div>}
+                  </div>
+                  <span className="hidden w-20 text-right text-xs text-white/30 sm:block">{a.ago}</span>
+                </li>
+              ))}
+            </ul>
           </Card>
         )}
       </section>
